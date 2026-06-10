@@ -1,0 +1,112 @@
+
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>알림 테스트 (3단계)</title>
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1.6.1/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 24px; color: #222; max-width: 640px; }
+        h2 { margin-bottom: 4px; }
+        section { border: 1px solid #ddd; border-radius: 8px; padding: 14px 16px; margin-top: 14px; }
+        section h3 { margin: 0 0 10px; font-size: 16px; }
+        label { display: block; margin-top: 8px; font-weight: bold; font-size: 13px; }
+        input { width: 260px; padding: 6px; margin-top: 4px; }
+        button { padding: 6px 12px; margin: 10px 6px 0 0; cursor: pointer; }
+        #log { margin-top: 14px; padding: 10px; border: 1px solid #ccc; border-radius: 8px;
+               height: 220px; overflow-y: auto; font-family: Consolas, monospace; font-size: 13px; }
+        #log div { padding: 1px 0; color: #555; }
+        #log .direct { color: #2e7d32; }
+        #log .error  { color: #c62828; }
+    </style>
+</head>
+<body>
+<h2>알림 테스트 (3단계: 댓글 알림)</h2>
+
+<section>
+    <h3>① 접속</h3>
+    <label for="username">username</label>
+    <input id="username" value="minsu">
+    <div>
+        <button type="button" onclick="issueToken()">토큰 발급</button>
+        <button type="button" onclick="connect()">연결</button>
+        <button type="button" onclick="disconnect()">종료</button>
+    </div>
+</section>
+
+<section>
+    <h3>② 댓글 달기</h3>
+    <label for="postAuthor">글쓴이</label>
+    <input id="postAuthor" value="minsu">
+    <label for="commenter">댓글 쓴 사람</label>
+    <input id="commenter" value="jihun">
+    <label for="commentBody">댓글</label>
+    <input id="commentBody" value="글 잘 봤어요">
+    <button type="button" onclick="sendComment()">댓글 달기</button>
+</section>
+
+<div id="log"></div>
+
+<script>
+    var token = null;
+    var stompClient = null;
+
+    function writeLog(text, cssClass) {
+        var line = document.createElement("div");
+        if (cssClass) line.className = cssClass;
+        line.textContent = text;
+        var log = document.getElementById("log");
+        log.appendChild(line);
+        log.scrollTop = log.scrollHeight;
+    }
+
+    function issueToken() {
+        var username = document.getElementById("username").value;
+        fetch("/auth/token", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username: username })
+        })
+            .then(function (res) {
+                if (!res.ok) throw new Error("토큰 발급 실패");
+                return res.json();
+            })
+            .then(function (data) { token = data.token; alert("토큰 발급 완료"); })
+            .catch(function (e) { alert(e.message); });
+    }
+
+    function connect() {
+        if (token == null) { alert("먼저 토큰을 발급하세요"); return; }
+        var socket = new SockJS("/ws");
+        stompClient = Stomp.over(socket);
+        stompClient.connect(
+            { Authorization: "Bearer " + token },
+            function () {
+                writeLog("연결 완료");
+                stompClient.subscribe("/user/queue/notifications", function (msg) {
+                    writeLog(JSON.parse(msg.body).message, "direct");
+                });
+            },
+            function () { writeLog("연결 실패", "error"); }
+        );
+    }
+
+    function sendComment() {
+        fetch("/comments", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                postAuthor: document.getElementById("postAuthor").value,
+                commenter: document.getElementById("commenter").value,
+                body: document.getElementById("commentBody").value
+            })
+        }).catch(function (e) { alert(e.message); });
+    }
+
+    function disconnect() {
+        if (stompClient != null) stompClient.disconnect(function () { writeLog("종료"); });
+    }
+</script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+spring:
+  application:
+    name: demo
+
+jwt:
+  secret: OWWGLRAAT0XW+A5eCkmaNoargUephuV+52M2o1iZP0AyF4Vml3bEvVYfEgMkXxCF1kX87W5PrdRX7F7qwFTDtQ==
+  expire-millis: 900000 # 15분
