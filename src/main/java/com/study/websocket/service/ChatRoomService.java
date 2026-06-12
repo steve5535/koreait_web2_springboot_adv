@@ -22,7 +22,7 @@ public class ChatRoomService {
     // member들을 기억
     private final Map<String, List<String>> roomMembers = new LinkedHashMap<>();
     // 순서가 중요할때는 LinkedHashMap 사용
-    // 정렬이 되는 HashMap이ㄴ
+    // 정렬이 되는 HashMap이다
 
     public void join(String roomId, String username) {
         boolean firstJoin = addMember(roomId, username);
