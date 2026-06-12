@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>채팅 테스트 (7단계)</title>
+  <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1.6.1/dist/sockjs.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; color: #222; max-width: 720px; }
+    h2 { margin-bottom: 4px; }
+    section { border: 1px solid #ddd; border-radius: 8px; padding: 14px 16px; margin-top: 14px; }
+    section h3 { margin: 0 0 10px; font-size: 16px; }
+    label { display: block; margin-top: 8px; font-weight: bold; font-size: 13px; }
+    input { width: 260px; padding: 6px; margin-top: 4px; }
+    button { padding: 6px 12px; margin: 10px 6px 0 0; cursor: pointer; }
+    button:disabled { cursor: not-allowed; opacity: 0.55; }
+    #currentRoom, #memberCount { font-weight: bold; }
+    #members { margin-top: 8px; padding: 8px; min-height: 20px; border: 1px solid #eee; border-radius: 6px; }
+    #log { margin-top: 14px; padding: 10px; border: 1px solid #ccc; border-radius: 8px;
+           height: 240px; overflow-y: auto; font-family: Consolas, monospace; font-size: 13px; }
+    #log div { padding: 1px 0; color: #555; }
+    #log .chat { color: #222; }
+    #log .system { color: #1565c0; }
+    #log .error { color: #c62828; }
+  </style>
+</head>
+<body>
+<h2>채팅 테스트 (7단계: 입장/퇴장 + 접속자 목록)</h2>
+
+<section>
+  <h3>① 접속</h3>
+  <label for="username">username</label>
+  <input id="username" value="minsu">
+  <div>
+    <button id="tokenButton" type="button" onclick="issueToken()">토큰 발급</button>
+    <button id="connectButton" type="button" onclick="connect()">연결</button>
+    <button id="disconnectButton" type="button" onclick="disconnect()">종료</button>
+  </div>
+</section>
+
+<section>
+  <h3>② 방</h3>
+  <label for="roomId">방 이름</label>
+  <input id="roomId" value="room1">
+  <div>
+    <button id="joinButton" type="button" onclick="joinRoom()">입장</button>
+    <button id="leaveButton" type="button" onclick="leaveRoom()">나가기</button>
+  </div>
+  <p>현재 방: <span id="currentRoom">없음</span></p>
+  <p>접속자 수: <span id="memberCount">0</span></p>
+  <div id="members">없음</div>
+</section>
+
+<section>
+  <h3>③ 채팅</h3>
+  <label for="chatMessage">메시지</label>
+  <input id="chatMessage" value="안녕하세요" onkeydown="if (event.key === 'Enter') sendChat()">
+  <button id="sendButton" type="button" onclick="sendChat()">보내기</button>
+</section>
+
+<div id="log"></div>
+
+<script>
+  var token = null;
+  var stompClient = null;
+  var roomSubscription = null;
+  var memberSubscription = null;
+  var currentRoom = null;
+
+  function writeLog(text, cssClass) {
+      var line = document.createElement("div");
+      if (cssClass) line.className = cssClass;
+      line.textContent = text;
+      var log = document.getElementById("log");
+      log.appendChild(line);
+      log.scrollTop = log.scrollHeight;
+  }
+
+  function setMembers(message) {
+      document.getElementById("memberCount").textContent = message.count;
+      document.getElementById("members").textContent =
+          message.members.length === 0 ? "없음" : message.members.join(", ");
+  }
+
+  function clearMembers() {
+      document.getElementById("memberCount").textContent = "0";
+      document.getElementById("members").textContent = "없음";
+  }
+
+  function updateButtons() {
+      var connected = stompClient != null && stompClient.connected;
+      document.getElementById("joinButton").disabled = !connected || currentRoom != null;
+      document.getElementById("leaveButton").disabled = currentRoom == null;
+      document.getElementById("sendButton").disabled = currentRoom == null;
+  }
+
+  function issueToken() {
+      var username = document.getElementById("username").value;
+      fetch("/auth/token", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: username })
+      })
+          .then(function (res) {
+              if (!res.ok) throw new Error("토큰 발급 실패");
+              return res.json();
+          })
+          .then(function (data) { token = data.token; alert("토큰 발급 완료"); })
+          .catch(function (e) { alert(e.message); });
+  }
+
+  function connect() {
+      if (token == null) { alert("먼저 토큰을 발급하세요"); return; }
+      var socket = new SockJS("/ws");
+      stompClient = Stomp.over(socket);
+      stompClient.connect(
+          { Authorization: "Bearer " + token },
+          function () {
+              writeLog("연결 완료 - 방에 입장하세요", "system");
+              updateButtons();
+          },
+          function () {
+              writeLog("연결 실패", "error");
+              updateButtons();
+          }
+      );
+  }
+
+  function joinRoom() {
+      if (stompClient == null || !stompClient.connected) { alert("먼저 연결하세요"); return; }
+
+      var roomId = document.getElementById("roomId").value.trim();
+      if (roomId.length === 0) { alert("방 이름을 입력하세요"); return; }
+
+      roomSubscription = stompClient.subscribe("/topic/rooms/" + roomId + "/chat", function (msg) {
+          var chat = JSON.parse(msg.body);
+          var cssClass = chat.sender === "SYSTEM" ? "system" : "chat";
+          writeLog(chat.sender + ": " + chat.message, cssClass);
+      });
+
+      memberSubscription = stompClient.subscribe("/topic/rooms/" + roomId + "/members", function (msg) {
+          setMembers(JSON.parse(msg.body));
+      });
+
+      currentRoom = roomId;
+      document.getElementById("currentRoom").textContent = roomId;
+      updateButtons();
+
+      stompClient.send("/app/rooms/" + roomId + "/join", {}, JSON.stringify({}));
+  }
+
+  function leaveRoom() {
+      if (currentRoom == null) return;
+
+      var leavingRoom = currentRoom;
+      if (stompClient != null && stompClient.connected) {
+          stompClient.send("/app/rooms/" + leavingRoom + "/leave", {}, JSON.stringify({}));
+      }
+      if (roomSubscription != null) roomSubscription.unsubscribe();
+      if (memberSubscription != null) memberSubscription.unsubscribe();
+
+      roomSubscription = null;
+      memberSubscription = null;
+      currentRoom = null;
+      document.getElementById("currentRoom").textContent = "없음";
+      clearMembers();
+      writeLog(leavingRoom + " 나감", "system");
+      updateButtons();
+  }
+
+  function sendChat() {
+      if (currentRoom == null) { alert("먼저 방에 입장하세요"); return; }
+      var message = document.getElementById("chatMessage").value;
+      stompClient.send("/app/rooms/" + currentRoom + "/chat", {}, JSON.stringify({ message: message }));
+  }
+
+  function disconnect() {
+      if (currentRoom != null) leaveRoom();
+      if (stompClient != null) {
+          stompClient.disconnect(function () { writeLog("종료", "system"); });
+      }
+      stompClient = null;
+      updateButtons();
+  }
+
+  updateButtons();
+</script>
+</body>
+</html>
